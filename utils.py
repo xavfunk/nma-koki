@@ -5,10 +5,13 @@ This file provides fucntions for shuffling, shifting and simulating neurons
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import zscore
+from scipy.optimize import curve_fit
+from scipy.stats import halfnorm
 
-
+## shifting and shuffling
 
 def shift_neurons(neurons, shift_range = None, chunk_size = 1, shuffle = False):
+	
 	"""
 	shifts neuronal time series, according to shift parameter
 
@@ -49,10 +52,9 @@ def shift_neurons(neurons, shift_range = None, chunk_size = 1, shuffle = False):
 		shifted_neurons[index] = np.roll(shuffled_neurons[index], shift)
 
 	return shifted_neurons
-# test
-#shift_neurons(dat['sresp'][:20])
   
 def shuffle_neurons(neurons):
+	
 	"""
 	shuffles neuronal time series
 	inputs:
@@ -69,8 +71,73 @@ def shuffle_neurons(neurons):
 
 	return shuffled_neurons.T
 
-# test
-#shuffle_neurons(dat['sresp'][:20]).shape
+## simulations
+
+def fit_halfnorm(k, s):
+    
+    '''halfnorm function, parameter s is the standard deviation'''
+    
+    return halfnorm.pdf(k, 0, s)
+
+def simulate_neurons(neurons, plot_hist = False):
+	
+	"""
+	Takes an array of neuronal activations and simulates neurons with similar activity distribution.
+	Does not conserve activity timings. 
+	The array of simulated neurons has the same shape as the input neurons. 
+	
+	inputs:
+	neurons: array; neuronal time series of shape n_neurons x timepoints
+	
+	outputs:
+	synthetic_neurons: array: synthetic data for each neuron
+	params: array: array of halfnormal std
+	"""
+	
+	# initialize result arrays
+	synthetic_neurons = np.zeros_like(neurons)
+	params = np.zeros(dat['sresp'].shape[0]) # will contain halfnormal stds of every neuron
+
+	# loop over neurons
+	for i, neuron in enumerate(neurons):
+	
+		# clean the neuron by removing zeros
+		neuron_clean = neuron[neuron > 0]
+		# keep track of number of zeros
+		n_zeros = ((neuron > 0) == False).sum()
+
+		# initialize bins for histogram
+		bins = np.arange(200) - 0.5
+
+		## get histogram
+		if plot_hist is True:
+			# with plt, plots the hgram
+			entries, bin_edges, patches = plt.hist(neuron_clean, bins=bins, density=True, label='Data')
+		else:
+			# with numpy, not plotting
+			entries, bin_edges = np.histogram(neuron_clean, bins=bins, density=True)
+
+		# get bin middles for accurate x's    	
+		bin_middles = 0.5 * (bin_edges[1:] + bin_edges[:-1])
+
+		# Halfgaussian fit with curve_fit
+		p0 = 10 # starting value 10 seemed reasonable and worked reliably
+		parameters_n, cov_matrix_n = curve_fit(fit_halfnorm, bin_middles[1:], entries[1:], p0 = p0)
+
+		# simulate with fitted parameters
+		synthetic_neuron = halfnorm.rvs(scale = parameters_n, size=neurons.shape[1])
+
+		# insert zeros
+		idxs = np.random.choice(neurons.shape[1], int(n_zeros), replace=False)
+		synthetic_neuron[idxs] = 0 
+
+		# insert result
+		synthetic_neurons[i] = synthetic_neuron
+		params[i] = parameters_n
+
+	return synthetic_neurons, params
+
+## plotting
 
 def plot_carpet(data, nrange = np.arange(1100, 1400), title = None):
 
@@ -84,7 +151,8 @@ def plot_carpet(data, nrange = np.arange(1100, 1400), title = None):
 if __name__ == "__main__":
 
 	## Test the functions
-	# load functions
+	
+	# load data
 	dat = np.load('stringer_spontaneous.npy', allow_pickle=True).item()
 	#dat_ori = np.load('stringer_orientations.npy', allow_pickle=True).item()
 	
@@ -92,18 +160,24 @@ if __name__ == "__main__":
 	shift = shift_neurons(dat['sresp'], chunk_size = dat['sresp'].shape[0]//100, shuffle = False)
 	shuffle = shuffle_neurons(dat['sresp'])
 	
-	# plot
+	# plot_carpet
 	shift = zscore(shift)
 	shuffle = zscore(shuffle)
 	
 	plot_carpet(shift)
 	plot_carpet(shuffle)
-
-
-
-
-
-
+	
+	
+	# simulate
+	synthetic_neurons, params = simulate_neurons(dat['sresp'][:20])
+	
+	i = 19
+	scale = 1
+	bins = np.arange(200) - 0.5
+	plt.hist(synthetic_neurons[i]*scale, bins = bins, alpha = .5)
+	plt.hist(dat['sresp'][i], bins = bins, alpha = .5)
+	#plt.ylim(0,500)
+	plt.show()
 
 
 
